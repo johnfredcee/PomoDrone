@@ -9,7 +9,7 @@
 #include <QPushButton>
 #include <QTimer>
 #include <Qdialog>
-#include "vector"
+#include "deque"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -17,9 +17,13 @@ class MainWindow;
 }
 QT_END_NAMESPACE
 
+// pomo time in secconds
+constexpr int pomotime = 20 * 60;
+
 struct Task {
     QString description;
     int pomodoros;
+    int elapsedtime;
 };
 
 class MainWindow : public QDialog {
@@ -40,8 +44,11 @@ private slots:
     void removeSelectedTask();
     void saveTasks();
     void loadTasks();
-    
+    void updateElapsedTime();
+
 private:
+    std::deque<Task> tasks;
+
     QListWidget *taskListWidget;
     QLineEdit *taskInput; 
     QSpinBox *pomodoroInput;
@@ -57,9 +64,9 @@ private:
     std::unique_ptr<QAction> hideAction;
     std::unique_ptr<QAction> quitAction;
     std::unique_ptr<QTimer> timer;
+    std::unique_ptr<QTimer> auxTimer;
 
-    std::vector<Task> tasks;
-
+    bool bIsPaused;
 };
 
 #endif // MAINWINDOW_H

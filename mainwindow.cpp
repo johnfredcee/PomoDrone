@@ -6,6 +6,7 @@
 #include <QApplication>
 #include <QAction>
 #include <QSettings>
+#include <memory>
 
 MainWindow::MainWindow(QWidget *parent) : QDialog(parent), timer(new QTimer(this))
 {
@@ -51,7 +52,13 @@ MainWindow::MainWindow(QWidget *parent) : QDialog(parent), timer(new QTimer(this
     trayIcon->setContextMenu(trayMenu.get());
     trayIcon->show();
 
+    // Timer ----------------------------------------
+    timer = std::make_unique<QTimer>();
+    auxTimer = std::make_unique<QTimer>();
+    bIsPaused = false;
+
     connect(timer.get(), &QTimer::timeout, this, &MainWindow::showNotification);
+    connect(auxTimer.get(), &QTimer::timeout, this, &MainWindow::updateElapsedTime);
 
     // Task Management UI ----------------------------------------
     QVBoxLayout *layout = new QVBoxLayout(this);
@@ -94,7 +101,15 @@ void MainWindow::startPomodoro()
                               QSystemTrayIcon::Information);
         return;
     }
-    timer->start(25 * 60 * 1000); // 25 minutes
+    if (!bIsPaused)
+    {
+        timer->start(pomotime * 1000);
+    }
+    else {
+        timer->start();
+        bIsPaused = false;
+    }
+    auxTimer->start(1000);
     trayIcon->showMessage("Pomodoro Started", "Focus for 25 minutes!",
                           QSystemTrayIcon::Information);
 }
@@ -104,6 +119,7 @@ void MainWindow::stopPomodoro()
     if (timer->isActive())
     {
         timer->stop();
+        auxTimer->stop();
     }
 }
 
@@ -114,6 +130,8 @@ void MainWindow::pausePomodoro()
         int remainingTime = timer->remainingTime();
         timer->stop();
         timer->setInterval(remainingTime);
+        auxTimer->stop();
+        bIsPaused = true;
     }
 }
 
@@ -121,6 +139,35 @@ void MainWindow::showNotification()
 {
     trayIcon->showMessage("Pomodoro Over!", "Take a break!", QSystemTrayIcon::Information);
     timer->stop();
+    auxTimer->stop();
+    Task& currentTask = tasks.front();
+    currentTask.pomodoros--;
+    if (currentTask.pomodoros == 0)
+    {
+        tasks.pop_front();
+        delete taskListWidget->takeItem(0);
+    }
+}
+
+void MainWindow::updateElapsedTime()
+{
+    if (timer->isActive())
+    {
+        Task& currentTask = tasks.front();
+        int elapsedTime  = currentTask.elapsedtime;
+        elapsedTime++;
+        int remaining = pomotime * currentTask.pomodoros - elapsedTime; // Time left in seconds
+        int minutes = remaining / 60;
+        int seconds = remaining % 60;
+         // Update the system tray tooltip
+        trayIcon->setToolTip(QString("Pomodoro: %1:%2 left").arg(minutes).arg(seconds, 2, 10, QChar('0')));
+        if (remaining <= 0)
+        {
+            auxTimer->stop();
+        }
+        currentTask.elapsedtime = elapsedTime;
+        
+    }
 }
 
 void MainWindow::showTasks()
@@ -144,7 +191,7 @@ void MainWindow::addTask() {
     }
 
     // Add to the list
-    tasks.push_back({description, pomodoroCount});
+    tasks.push_back({description, pomodoroCount, 0});
     taskListWidget->addItem(description + " (" + QString::number(pomodoroCount) + " Pomodoros)");
 
     // Clear input
@@ -171,6 +218,7 @@ void MainWindow::saveTasks() {
         settings.setArrayIndex(i);
         settings.setValue("description", tasks[i].description);
         settings.setValue("pomodoros", tasks[i].pomodoros);
+        settings.setValue("elapsedTime", tasks[i].elapsedtime);
     }
     settings.endArray();
 }
@@ -183,7 +231,7 @@ void MainWindow::loadTasks() {
         settings.setArrayIndex(i);
         QString description = settings.value("description").toString();
         int pomodoros = settings.value("pomodoros").toInt();
-
+        int elapsedTime = settings.value("elapsedTime").toInt();
         tasks.push_back({description, pomodoros});
         taskListWidget->addItem(description + " (" + QString::number(pomodoros) + " Pomodoros)");
     }
