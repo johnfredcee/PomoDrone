@@ -19,6 +19,8 @@ QT_END_NAMESPACE
 
 // pomo time in secconds
 constexpr int pomotime = 20 * 60;
+// break time in seconds
+constexpr int breaktime = 5 * 60;
 
 struct Task {
     QString description;
@@ -36,6 +38,7 @@ public:
 private slots:
     void startPomodoro();
     void stopPomodoro();
+    void abandonPomodoro();
     void pausePomodoro();
     void showNotification();
     void showTasks();
@@ -45,8 +48,12 @@ private slots:
     void saveTasks();
     void loadTasks();
     void updateElapsedTime();
+    void endBreak();
 
 private:
+    void startBreakTimer();
+    void startPomoTimer();
+    
     std::deque<Task> tasks;
 
     QListWidget *taskListWidget;
@@ -59,13 +66,14 @@ private:
     std::unique_ptr<QMenu> trayMenu;
     std::unique_ptr<QAction> showAction;
     std::unique_ptr<QAction> startAction;
-    std::unique_ptr<QAction> stopAction;
+    std::unique_ptr<QAction> endAction;
     std::unique_ptr<QAction> pauseAction;
     std::unique_ptr<QAction> hideAction;
     std::unique_ptr<QAction> quitAction;
-    std::unique_ptr<QTimer> timer;
-    std::unique_ptr<QTimer> auxTimer;
+    std::unique_ptr<QTimer> pomoTimer;
+    std::unique_ptr<QTimer> breakTimer;
 
+    int elapsedBreakTime;
     bool bIsPaused;
 };
 

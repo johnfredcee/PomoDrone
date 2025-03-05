@@ -8,7 +8,7 @@
 #include <QSettings>
 #include <memory>
 
-MainWindow::MainWindow(QWidget *parent) : QDialog(parent), timer(new QTimer(this))
+MainWindow::MainWindow(QWidget *parent) : QDialog(parent)
 {
     // ensure window is not initally visible
     setWindowFlag(Qt::WindowCloseButtonHint, false);
@@ -22,15 +22,15 @@ MainWindow::MainWindow(QWidget *parent) : QDialog(parent), timer(new QTimer(this
 
     showAction = std::make_unique<QAction>("Show Tasks", this);
     hideAction = std::make_unique<QAction>("Hide Tasks", this);
-    startAction = std::make_unique<QAction>("Start Pomodoro", this);
-    stopAction = std::make_unique<QAction>("Stop Pomodoro", this);
+    startAction = std::make_unique<QAction>("End Pomodoro", this);
+    endAction = std::make_unique<QAction>("Abandon Pomodoro", this);
     pauseAction = std::make_unique<QAction>("Pause Pomodoro", this);
     quitAction = std::make_unique<QAction>("Quit", this);
 
     connect(showAction.get(), &QAction::triggered, this, &MainWindow::showTasks);
-    connect(hideAction.get(), &QAction::triggered, this, &MainWindow::hideTasks);
+    connect(hideAction.get(), &QAction::triggered, this, &MainWindow::hideTasks);   
     connect(startAction.get(), &QAction::triggered, this, &MainWindow::startPomodoro);
-    connect(stopAction.get(), &QAction::triggered, this, &MainWindow::stopPomodoro);
+    connect(endAction.get(), &QAction::triggered, this, &MainWindow::abandonPomodoro);
     connect(pauseAction.get(), &QAction::triggered, this, &MainWindow::pausePomodoro);
 
     connect(quitAction.get(), &QAction::triggered, qApp, [this]() {
@@ -44,7 +44,7 @@ MainWindow::MainWindow(QWidget *parent) : QDialog(parent), timer(new QTimer(this
     trayMenu->addAction(hideAction.get());
     trayMenu->addSeparator();
     trayMenu->addAction(startAction.get());
-    trayMenu->addAction(stopAction.get());
+    trayMenu->addAction(endAction.get());
     trayMenu->addAction(pauseAction.get());
     trayMenu->addSeparator();
     trayMenu->addAction(quitAction.get());
@@ -53,12 +53,13 @@ MainWindow::MainWindow(QWidget *parent) : QDialog(parent), timer(new QTimer(this
     trayIcon->show();
 
     // Timer ----------------------------------------
-    timer = std::make_unique<QTimer>();
-    auxTimer = std::make_unique<QTimer>();
+    breakTimer = std::make_unique<QTimer>();
+    pomoTimer = std::make_unique<QTimer>();
     bIsPaused = false;
 
-    connect(timer.get(), &QTimer::timeout, this, &MainWindow::showNotification);
-    connect(auxTimer.get(), &QTimer::timeout, this, &MainWindow::updateElapsedTime);
+
+    connect(pomoTimer.get(), &QTimer::timeout, this, &MainWindow::updateElapsedTime);
+    connect(breakTimer.get(), &QTimer::timeout, this, &MainWindow::updateElapsedTime);
 
     // Task Management UI ----------------------------------------
     QVBoxLayout *layout = new QVBoxLayout(this);
@@ -94,43 +95,83 @@ MainWindow::MainWindow(QWidget *parent) : QDialog(parent), timer(new QTimer(this
 
 MainWindow::~MainWindow() { }
 
+
+void MainWindow::startBreakTimer()
+{
+    pomoTimer->stop();
+    breakTimer->setInterval(1000);
+    breakTimer->start();
+    elapsedBreakTime = breaktime;
+
+}
+
+void MainWindow::startPomoTimer()
+{
+    breakTimer->stop();
+    if (!bIsPaused)
+    {
+        pomoTimer->start(1000);
+    }
+    else {
+        pomoTimer->start();
+        bIsPaused = false;
+    }
+}
+
 void MainWindow::startPomodoro()
 {
-    if (timer->isActive()) {
+    if (pomoTimer->isActive()) {
         trayIcon->showMessage("Pomodoro Already Running", "Stay focused!",
                               QSystemTrayIcon::Information);
         return;
     }
-    if (!bIsPaused)
-    {
-        timer->start(pomotime * 1000);
-    }
     else {
-        timer->start();
-        bIsPaused = false;
+        startPomoTimer();
+        trayIcon->showMessage("Pomodoro Started", "Focus for 25 minutes!",  QSystemTrayIcon::Information);
+        startAction->setEnabled(false);
+        pauseAction->setEnabled(true);
+        endAction->setEnabled(true);
     }
-    auxTimer->start(1000);
-    trayIcon->showMessage("Pomodoro Started", "Focus for 25 minutes!",
-                          QSystemTrayIcon::Information);
+}
+
+void MainWindow::abandonPomodoro()
+{
+    if (pomoTimer->isActive())
+    {
+        Task& currentTask = tasks.front();
+        currentTask.elapsedtime = currentTask.pomodoros * pomotime;
+        pomoTimer->stop();
+        startAction->setEnabled(true);
+        pauseAction->setEnabled(false);
+        endAction->setEnabled(false);
+    }
 }
 
 void MainWindow::stopPomodoro()
 {
-    if (timer->isActive())
+    if (pomoTimer->isActive())
     {
-        timer->stop();
-        auxTimer->stop();
+        Task& currentTask = tasks.front();
+        currentTask.pomodoros--;
+        if (currentTask.pomodoros == 0)
+        {
+            tasks.pop_front();
+            delete taskListWidget->takeItem(0);
+        }
+        startBreakTimer();
+        startAction->setEnabled(true);
+        pauseAction->setEnabled(false);
+        endAction->setEnabled(false);
     }
 }
 
 void MainWindow::pausePomodoro()
 {
-    if (timer->isActive())
+    if (pomoTimer->isActive())
     {
-        int remainingTime = timer->remainingTime();
-        timer->stop();
-        timer->setInterval(remainingTime);
-        auxTimer->stop();
+        int remainingTime = pomoTimer->remainingTime();
+        pomoTimer->stop();
+        pomoTimer->setInterval(remainingTime);
         bIsPaused = true;
     }
 }
@@ -138,20 +179,18 @@ void MainWindow::pausePomodoro()
 void MainWindow::showNotification()
 {
     trayIcon->showMessage("Pomodoro Over!", "Take a break!", QSystemTrayIcon::Information);
-    timer->stop();
-    auxTimer->stop();
-    Task& currentTask = tasks.front();
-    currentTask.pomodoros--;
-    if (currentTask.pomodoros == 0)
-    {
-        tasks.pop_front();
-        delete taskListWidget->takeItem(0);
-    }
+ 
+}
+
+void MainWindow::endBreak()
+{
+    breakTimer->stop();
+    startPomodoro();
 }
 
 void MainWindow::updateElapsedTime()
 {
-    if (timer->isActive())
+    if (pomoTimer->isActive())
     {
         Task& currentTask = tasks.front();
         int elapsedTime  = currentTask.elapsedtime;
@@ -161,12 +200,23 @@ void MainWindow::updateElapsedTime()
         int seconds = remaining % 60;
          // Update the system tray tooltip
         trayIcon->setToolTip(QString("Pomodoro: %1:%2 left").arg(minutes).arg(seconds, 2, 10, QChar('0')));
-        if (remaining <= 0)
+        if (remaining % pomotime == 0)
         {
-            auxTimer->stop();
+            showNotification();
+            stopPomodoro();
         }
-        currentTask.elapsedtime = elapsedTime;
-        
+        currentTask.elapsedtime = elapsedTime;   
+    }
+    if (breakTimer->isActive())
+    {
+        int remaining = breaktime - elapsedBreakTime; // Time left in seconds
+        int minutes = remaining / 60;
+        int seconds = remaining % 60;
+        trayIcon->setToolTip(QString("Break %1:%2 left").arg(minutes).arg(seconds, 2, 10, QChar('0')));        
+        if (remaining == 0)
+        {
+            endBreak();
+        }
     }
 }
 
